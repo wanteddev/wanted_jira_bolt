@@ -287,7 +287,7 @@ def loading_reaction(client, channel, ts):
     """
     try:
         # Respond with an emoji directly to the thread
-        response = client.reactions_add(
+        client.reactions_add(
             channel=channel,
             name=PICollection.loading_emoji,
             timestamp=ts,
@@ -296,11 +296,11 @@ def loading_reaction(client, channel, ts):
         ...
 
     try:
-        yield response
+        yield
     finally:
         try:
             # Remove thumbsup reaction
-            response = client.reactions_remove(
+            client.reactions_remove(
                 channel=channel,
                 name=PICollection.loading_emoji,
                 timestamp=ts,
