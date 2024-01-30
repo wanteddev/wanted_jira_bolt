@@ -1,0 +1,3 @@
+requests
+slack_bolt
+atlassian-python-api
