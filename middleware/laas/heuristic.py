@@ -24,11 +24,20 @@ def parse_environment(environment):
     - wwwtest(스테이징 서버)
     """
     environment = environment.lower()
-    if 'dev' in environment:
-        return 'dev(개발 서버)'
-    elif ('nw' in environment) or ('nextweek' in environment):
-        return 'nextweek(테스트 서버)'
-    elif 'www' in environment:
-        return 'wwwtest(스테이징 서버)'
-    else:
-        return 'dev(개발 서버)'
+    match environment:
+        case 'dev':
+            return 'dev(개발 서버)'
+        case 'nw':
+            return 'nextweek(테스트 서버)'
+        case 'nextweek':
+            return 'nextweek(테스트 서버)'
+        case 'www':
+            return 'wwwtest(스테이징 서버)'
+        case 'wwwtest':
+            return 'wwwtest(스테이징 서버)'
+        case 'prod':
+            return 'wwwtest(스테이징 서버)'
+        case 'production':
+            return 'wwwtest(스테이징 서버)'
+        case _:
+            return 'dev(개발 서버)'
