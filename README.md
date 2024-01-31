@@ -2,6 +2,8 @@
 
 ## Too Long; Didn’t Read
 
+<img width="372" alt="image" src="https://github.com/wanteddev/wanted_jira_bolt/assets/12846075/00666a25-1b88-4f71-8ef2-0f5a01b01b6b">
+
 Wanted Jira Bolt 는 슬랙 스레드에 이모지를 달면 스레드 전체를 요약하여 Jira 티켓을 생성합니다!
 
 사용방법은 단순합니다. 채널에 봇을 초대하고, 이모지를 달면 됩니다!
