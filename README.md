@@ -76,7 +76,12 @@ Choose ONLY one from the list of Jira issue types provided here.
 
 Choose ONLY one from the list of Environments in which the issue was discovered provided here.
 - dev
+- nw
+- nextweek
+- prod
 - production
+- wwwtest
+- www
 
 Ensure that summaries and descriptions contain all relevant context needed to interpret them - in other words don't extract small snippets that are missing important context. Provide output in JSON format as follows:
 
