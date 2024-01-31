@@ -39,7 +39,6 @@ Wanted Jira Bolt 는 슬랙 스레드에 이모지를 달면 스레드 전체를
 
 스레드에서 논의한 내용을 요약해서 다시 이슈를 처음부터 작성해야 하고, 재현을 위해 스크린샷 등을 다시 찍어서 지라로 올리는 사례도 있습니다.
 
-
 ## Note
 
 Private 슬랙 채널에서는 이슈 생성이 되지 않습니다.
@@ -59,7 +58,7 @@ API 키가 있는 구성원에게 모든 알람이 가게 되니 주의하세요
 - Python 3.11 을 사용합니다.
 - [Wanted LaaS](https://laas.wanted.co.kr/)를 사용합니다.
 - Jira API 키가 필요합니다.
-- Slack App 토큰과 Bot 토큰이 필요합니다.(권한 설정 업데이트 예정)
+- Slack App 토큰과 Bot 토큰이 필요합니다.
 
 ## Wanted LaaS
 
@@ -91,6 +90,11 @@ Jira 이슈 타입을 명시적으로 제공하셔야 합니다.(작업, 버그�
 Wanted 는 environment 가 지라 이슈의 필수 필드에 해당하기 때문에 추가 휴리스틱이 들어가 있는데 이는 제거하셔도 좋습니다.
 해당 코드를 참조하는 부분은 수정하셔야 합니다.
 
+때로는 개발환경과 실환경의 용어를 De Facto로 구분하기도 하고, 사내에서만 사용하는 용어를 사용하기도 하기 때문에.
+De Facto로 구분하는 경우는 GPT system prompt 를 사용하고, 사내에서만 사용하는 용어를 사용하는 경우를 De Facto 키 값을 참조하도록 하였습니다.
+
+`middleware/laas/heuristic.py` 파일을 참고해 주세요.
+
 #### User
 
 ```
@@ -99,8 +103,7 @@ Document: """${context}"""
 
 ### 필터 설정
 
-- 모델: gpt-4-1106-preview
-- 응답 포맷: json_object
+- 모델: gpt-4
 - 온도: 0
 - 최대 길이(토큰): 4000
 - 상위 P: 0
@@ -130,9 +133,56 @@ ipython -i debug -- --project PI
 https://api.slack.com/apps
 
 아래 항목이 모두 체크되어 있어야 합니다.
-- Event Subscriptions: Socket Mode 를 사용합니다.
-- Bots
-- Permissions
+
+- Event Subscriptions
+    - Socket Mode 를 사용합니다.
+- OAuth & Permissions
+    - Bot Token Scopes
+        - channels:history
+        - channels:read
+        - chat:write
+        - chat:write.customize
+        - chat:write.public
+        - emoji:read
+        - files:read
+        - links:read
+        - links:write
+        - reactions:read
+        - reactions:write
+        - users:read
+        - users:read.email
+    - User Token Scopes
+        - reactions:read
+
+## Install
+
+`.env` 파일에 환경변수를 구성합니다.
+
+```
+SLACK_APP_TOKEN=
+SLACK_BOT_TOKEN=
+ATLASSIAN_API_KEY=
+LAAS_API_KEY=
+LAAS_JIRA_HASH=
+ATLASSIAN_USER=
+LAAS_PROJECT=
+SENTRY_DSN=
+```
+
+아래 명령어를 실행하여 로컬 테스트를 진행할 수 있습니다.
+
+```
+pip install -r requirements.txt
+python app.py
+```
+
+.env 파일을 주입하여 Docker Standalone 방식으로 운영할 수 있습니다.
+아래 명령어로 로컬 Docker 테스트도 진행 가능합니다.
+
+```
+docker build --no-cache -t wanted_jira_bolt .
+docker run --rm -it --env-file=.env wanted_jira_bolt
+```
 
 ## 안정적인 볼트 퍼포먼스를 위한 디테일한 장치들
 
