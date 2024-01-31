@@ -5,16 +5,17 @@ from json import JSONDecodeError
 from urllib.request import urlopen, Request, HTTPError
 from threading import Thread
 
+import sentry_sdk
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from middleware.laas.jira_generator import summary_generator, JiraGenerator
+from middleware.laas import jira_summary_generator
+from middleware.laas.heuristic import parse_environment, outside_slack_jira_user_map
+from middleware.laas.jira_generator import JiraGenerator
 
 
 class SlackCollection:
     # FIXME:
-    bot_token = os.environ['SLACK_BOT_TOKEN']
-    app_token = os.environ['SLACK_APP_TOKEN']
     workspace = 'wantedx.slack.com'
     trigger_emoji = 'pi_jira_gen'
     loading_emoji = 'loading'
@@ -24,10 +25,9 @@ class PICollection:
     # FIXME: anonymous 유저는 Wantedlab 에서 자동화에 사용하는 Automation for Jira 계정 ID 입니다
     workspace = 'wantedlab.atlassian.net'
     project = 'PI'
-    anonymous_user_id = '557058:f58131cb-b67d-43c7-b30d-6b58d40bd077'
 
 
-class WantedJiraGenerator(JiraGenerator):
+class WantedPIJira(JiraGenerator):
     def __init__(self, event):
         super().__init__()
         self.item_ts = event['item']['ts']
@@ -194,22 +194,13 @@ class WantedJiraGenerator(JiraGenerator):
             )
             raise e
 
-    def jira_user_id_map(self, slack_id):
-        """
-        Slack 유저 ID를 Jira 유저 ID로 매핑합니다.
-        이메일이 매핑되지 않은 경우, 이슈 생성자가 지라에 등록된 사용자인지 확인해야 합니다.
-        """
-        match slack_id:
-            case _:
-                return PICollection.anonymous_user_id
-
     def get_jira_account_id(self, client):
         # Get user info: Extract email from user info: permission 필요. users:read.email
         assignee_user_info = client.users_info(user=self.reaction_user)
         reporter_user_info = client.users_info(user=self.item_user)
         return {
-            'assignee': self.get_user_id_from_slack(assignee_user_info) or self.jira_user_id_map(self.reaction_user),
-            'reporter': self.get_user_id_from_slack(reporter_user_info) or self.jira_user_id_map(self.item_user),
+            'assignee': self.get_user_id_from_slack(assignee_user_info) or outside_slack_jira_user_map(self.reaction_user),
+            'reporter': self.get_user_id_from_slack(reporter_user_info) or outside_slack_jira_user_map(self.item_user),
         }
     
     def get_conversation_data(self, client):
@@ -233,7 +224,7 @@ class WantedJiraGenerator(JiraGenerator):
             # conversation 에 대한 모든 첨부파일을 복제합니다.
             for file in message.get('files', []):
                 private_file_url = file['url_private']
-                headers = {'Authorization': f'Bearer {SlackCollection.bot_token}'}
+                headers = {'Authorization': f'Bearer {os.environ["SLACK_BOT_TOKEN"]}'}
                 req = Request(private_file_url, headers=headers)
                 try:
                     response = urlopen(req)
@@ -289,7 +280,7 @@ def loading_reaction(client, channel, ts):
         # Respond with an emoji directly to the thread
         client.reactions_add(
             channel=channel,
-            name=PICollection.loading_emoji,
+            name=SlackCollection.loading_emoji,
             timestamp=ts,
         )
     finally:
@@ -302,7 +293,7 @@ def loading_reaction(client, channel, ts):
             # Remove thumbsup reaction
             client.reactions_remove(
                 channel=channel,
-                name=PICollection.loading_emoji,
+                name=SlackCollection.loading_emoji,
                 timestamp=ts,
             )
         finally:
@@ -320,29 +311,30 @@ def laas_jira_thread(event, client, say):
     item_user = event['item_user']
     reaction_user = event['user']
 
-    jc = WantedJiraGenerator(event)
+    pi= WantedPIJira(event)
     with loading_reaction(client, item_channel, item_ts):
-        if jc.check_jira_issue_exist(client, say):
+        if pi.check_jira_issue_exist(client, say):
             return
 
-        jira_accounts = jc.get_jira_account_id(client)
-        conversations = jc.get_conversation_data(client)
+        jira_accounts = pi.get_jira_account_id(client)
+        conversations = pi.get_conversation_data(client)
 
         # TODO: LaaS 의 서버 에러를 메시지로 보낼 필요도 있습니다. 현재 원티드는 외부 sentry로 확인합니다.
-        response = summary_generator(conversations['context']).json()
+        response = jira_summary_generator(conversations['context']).json()
 
-        gpt_response = jc.check_gpt_jira_response(response, say, conversations['first_thread_ts'])
-        gpt_metadata = jc.validation_gpt_jira_response_json(gpt_response, say, conversations['first_thread_ts'])
+        gpt_response = pi.check_gpt_jira_response(response, say, conversations['first_thread_ts'])
+        gpt_metadata = pi.validation_gpt_jira_response_json(gpt_response, say, conversations['first_thread_ts'])
 
         # Data Augmentation
         gpt_metadata['project'] = PICollection.project
-        gpt_metadata['description'] += f'\n\n*Slack Link*: {jc.slack_link(conversations["first_thread_ts"])}'
+        gpt_metadata['environment'] = parse_environment(gpt_metadata['environment'])
+        gpt_metadata['description'] += f'\n\n*Slack Link*: {pi.slack_link(conversations["first_thread_ts"])}'
         gpt_metadata['description'] += f'\n_이 이슈는 Data Bolt로부터 자동 생성되었습니다._'
         gpt_metadata['reporter'] = jira_accounts['reporter']
         gpt_metadata['assignee'] = jira_accounts['assignee']
 
         refined_fields = screen_fields(gpt_metadata)[gpt_metadata['issue_type']]
-        jira_response = jc.safe_create_jira_issues(refined_fields, conversations['screenshots'], say, conversations['first_thread_ts'])
+        jira_response = pi.safe_create_jira_issues(refined_fields, conversations['screenshots'], say, conversations['first_thread_ts'])
         blocks = [
             {
                 "type": "header",
@@ -428,7 +420,7 @@ def laas_jira_thread(event, client, say):
 
 
 # Initializes your app with your bot token and socket mode handler
-app = App(token=SlackCollection.app_token)
+app = App(token=os.environ['SLACK_BOT_TOKEN'])
 
 
 @app.event("reaction_added")
@@ -444,20 +436,14 @@ def reaction(event, client, say):
 
 if __name__ == "__main__":
     # Sentry 등 초기화 코드가 있다면 여기에 작성합니다.
-    # import sentry_sdk
-    # sentry_sdk.init(
-    #     dsn=os.environ['SENTRY_DSN'],
-    #     environment=os.environ['STAGE'],
-    #     release=os.environ['VERSION'],
-    #     # Set traces_sample_rate to 1.0 to capture 100%
-    #     # of transactions for performance monitoring.
-    #     # We recommend adjusting this value in production.
-    #     traces_sample_rate=1.0,
-    #     # 세션 추적은 하지 않는다.
-    #     auto_session_tracking=False,
-    # )
-    # sentry_sdk.set_tag(
-    #     'service',
-    #     '...,'
-    # )
-    SocketModeHandler(app, SlackCollection.bot_token).start()
+    sentry_sdk.init(
+        dsn=os.environ['SENTRY_DSN'],
+        environment='local',
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for performance monitoring.
+        # We recommend adjusting this value in production.
+        traces_sample_rate=1.0,
+        # 세션 추적은 하지 않는다.
+        auto_session_tracking=False,
+    )
+    SocketModeHandler(app, os.environ['SLACK_APP_TOKEN']).start()

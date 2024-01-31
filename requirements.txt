@@ -1,3 +1,4 @@
 requests
+sentry-sdk
 slack_bolt
 atlassian-python-api

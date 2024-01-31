@@ -1,24 +1,6 @@
 import os
 from io import BytesIO
 
-from middleware.laas import call_wanted_api
-
-
-# FIXME 환경변수로 지정해주세요.
-ATLASSIAN_USER = os.environ['ATLASSIAN_USER']
-ATLASSIAN_API_KEY = os.environ['ATLASSIAN_API_KEY']
-LAAS_JIRA_HASH = os.environ['LAAS_JIRA_HASH']
-
-
-def summary_generator(context):
-    """
-    Wanted LaaS API 중 Jira 생성기를 호출합니다.
-    """
-    return call_wanted_api('POST', '/api/preset/chat/completions', json={
-        "hash": LAAS_JIRA_HASH,
-        "params": {"context": context},
-    })
-
 
 class JiraGenerator:
     def __init__(self):
@@ -26,8 +8,8 @@ class JiraGenerator:
         self.base_url = 'https://wantedlab.atlassian.net'
         self.client = Jira(
             self.base_url,
-            username=ATLASSIAN_USER,
-            password=ATLASSIAN_API_KEY,
+            username=os.environ['ATLASSIAN_USER'],
+            password=os.environ['ATLASSIAN_API_KEY'],
             cloud=True,
         )
 

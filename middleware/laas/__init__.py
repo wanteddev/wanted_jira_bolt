@@ -8,17 +8,21 @@ def call_wanted_api(method, path, **kwargs):
     """
     return requests.request(
         method=method,
-        url=f"{LAAS_BASE_URL}{path}",
+        url=f"https://api-laas.wanted.co.kr{path}",
         headers={
-            "project": LAAS_PROJECT,
-            "apiKey": LAAS_API_KEY,
+            "project": os.environ['LAAS_PROJECT'],
+            "apiKey": os.environ['LAAS_API_KEY'],
             "Content-Type": "application/json; charset=utf-8",
         },
         **kwargs,
     )
 
 
-# FIXME 환경변수로 지정해주세요.
-LAAS_BASE_URL = 'https://api-laas.wanted.co.kr'
-LAAS_PROJECT = os.environ['LAAS_PROJECT']
-LAAS_API_KEY = os.environ['LAAS_API_KEY']
+def jira_summary_generator(context):
+    """
+    Wanted LaaS API 중 Jira 생성기를 호출합니다.
+    """
+    return call_wanted_api('POST', '/api/preset/chat/completions', json={
+        "hash": os.environ['LAAS_JIRA_HASH'],
+        "params": {"context": context},
+    })
