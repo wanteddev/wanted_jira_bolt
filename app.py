@@ -329,7 +329,7 @@ def laas_jira_thread(event, client, say):
         gpt_metadata['project'] = PICollection.project
         gpt_metadata['environment'] = parse_environment(gpt_metadata['environment'])
         gpt_metadata['description'] += f'\n\n*Slack Link*: {pi.slack_link(conversations["first_thread_ts"])}'
-        gpt_metadata['description'] += f'\n_이 이슈는 Data Bolt로부터 자동 생성되었습니다._'
+        gpt_metadata['description'] += f'\n_이 이슈는 Wanted Jira Bolt로부터 자동 생성되었습니다._'
         gpt_metadata['reporter'] = jira_accounts['reporter']
         gpt_metadata['assignee'] = jira_accounts['assignee']
 
