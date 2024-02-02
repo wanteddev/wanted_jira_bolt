@@ -21,7 +21,7 @@ class SlackCollection:
 
 
 class PICollection:
-    # FIXME: anonymous 유저는 Wantedlab 에서 자동화에 사용하는 Automation for Jira 계정 ID 입니다
+    # FIXME:
     workspace = 'wantedlab.atlassian.net'
     project = 'PI'
     trigger_emoji = 'tichu'

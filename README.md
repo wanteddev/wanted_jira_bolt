@@ -165,13 +165,13 @@ https://api.slack.com/apps
 `.env` 파일에 환경변수를 구성합니다.
 
 ```
-SLACK_APP_TOKEN=
-SLACK_BOT_TOKEN=
-ATLASSIAN_API_KEY=
-LAAS_API_KEY=
-ATLASSIAN_USER=
-LAAS_PROJECT=
-SENTRY_DSN=
+SLACK_APP_TOKEN=xapp-...
+SLACK_BOT_TOKEN=xoxb-...
+ATLASSIAN_API_KEY=ATATT...
+LAAS_API_KEY=...
+ATLASSIAN_USER=jongwon@wantedlab.com
+LAAS_PROJECT=WANTED_DATA
+SENTRY_DSN=https://...
 ```
 
 아래 명령어를 실행하여 로컬 테스트를 진행할 수 있습니다.
