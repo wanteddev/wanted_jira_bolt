@@ -1,9 +1,9 @@
 from argparse import ArgumentParser
 
-from middleware.laas.jira_generator import JiraGenerator
+from middleware.laas.jira_operator import JiraOperator
 
 
-class DebugJiraGenerator(JiraGenerator):
+class DebugJiraGenerator(JiraOperator):
     def get_jira_screens(self):
         resp = self.client.get(
             self.client.resource_url('screens'),

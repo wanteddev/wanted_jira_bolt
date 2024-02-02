@@ -18,11 +18,11 @@ def call_wanted_api(method, path, **kwargs):
     )
 
 
-def jira_summary_generator(context):
+def jira_summary_generator(hash, context):
     """
     Wanted LaaS API 중 Jira 생성기를 호출합니다.
     """
     return call_wanted_api('POST', '/api/preset/chat/completions', json={
-        "hash": os.environ['LAAS_JIRA_HASH'],
+        "hash": hash,
         "params": {"context": context},
     })

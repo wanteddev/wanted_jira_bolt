@@ -2,7 +2,7 @@ import os
 from io import BytesIO
 
 
-class JiraGenerator:
+class JiraOperator:
     def __init__(self):
         from atlassian import Jira
         self.base_url = 'https://wantedlab.atlassian.net'
