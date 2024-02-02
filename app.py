@@ -24,7 +24,7 @@ class PICollection:
     # FIXME:
     workspace = 'wantedlab.atlassian.net'
     project = 'PI'
-    trigger_emoji = 'tichu'
+    trigger_emoji = 'pi_jira_gen'
     laas_jira_hash = 'b2cac55301e0fc435b14d49a2069731093e785dff7099dcd1677c0c794dfd177'
 
 
