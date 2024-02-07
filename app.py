@@ -178,7 +178,38 @@ class SlackOperator:
         """
         try:
             gpt_metadata = json.loads(gpt_response)
+            assert gpt_metadata['issue_type'] in ['버그', '작업']
             return gpt_metadata
+        except AssertionError as e:
+            say(
+                channel=self.reaction_user,
+                blocks=[
+                    {
+                        "type": "header",
+                        "text": {
+                            "type": "plain_text",
+                            "text": f'Jira 이슈 생성에 실패했습니다.'
+                        }
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": gpt_response,
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": f'GPT 분류에 실패했습니다. 지라를 생성하기에 앞서 스레드 요약이 충분한지 확인해보세요.',
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": f'<{self.slack_link}|스레드 바로가기>',
+                            }
+                        ]
+                    }
+                ],
+            )
         except JSONDecodeError as e:
             say(
                 channel=self.reaction_user,
