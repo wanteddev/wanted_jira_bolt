@@ -1,9 +1,11 @@
 import os
 import json
+import signal
+import atexit
+import threading
 import contextlib
 from json import JSONDecodeError
 from urllib.request import urlopen, Request, HTTPError
-from threading import Thread
 
 import sentry_sdk
 from slack_bolt import App
@@ -515,6 +517,7 @@ def laas_jira_thread(event, client, say, collection):
 
 # Initializes your app with your bot token and socket mode handler
 app = App(token=os.environ['SLACK_BOT_TOKEN'])
+is_exiting = False
 
 
 @app.event("reaction_added")
@@ -524,11 +527,53 @@ def reaction(event, client, say):
     """
     match event['reaction']:
         case PICollection.trigger_emoji:
-            t = Thread(target=laas_jira_thread, args=(event, client, say, PICollection))
+            t = threading.Thread(target=laas_jira_thread, args=(event, client, say, PICollection), daemon=False)
             t.start()
 
 
+def os_term_handler(signum, frame):
+    """
+    이 함수는 운영 체제 시그널에 대한 핸들러입니다. 애플리케이션이 종료 시그널(SIGTERM)을 받으면 at_exit_handler() 함수를 호출합니다.
+
+    AWS 콘솔에서 ECS 중지 버튼을 클릭한 경우는 SIGTERM 을 호출합니다.
+    SIGTERM 이후 30초 동안 프로세스가 종료되지 않으면 SIGKILL 을 호출합니다.
+    try - finally 로직을 타지 않습니다.
+    """
+    signame = signal.Signals(signum).name
+    print(f'SIGNAL received: {signame} ({signum})')
+    print('Frame:', frame)
+
+    at_exit_handler()
+
+
+@atexit.register
+def at_exit_handler():
+    """
+    애플리케이션이 종료되려 할 때 호출됩니다.
+    참고: 이 모듈을 통해 등록된 함수는 다음과 같은 경우 호출되지 않습니다.
+    - 프로그램이 파이썬이 처리하지 않는 시그널에 의해 종료될 때.
+    - 파이썬의 치명적인 내부 에러가 감지되었을 때.
+    - os._exit() 가 호출될 때.
+
+    모든 실행 중인 스레드를 순회합니다.
+    스레드가 메인 스레드가 아니고 daemon이 아닌 스레드라면, 스레드가 실행을 마칠 때까지 기다립니다(스레드에 join합니다).
+    """
+    print('AtExit handler')
+    # sys.exit()을 호출할 경우 atexit을 중복 호출 할 수 있으므로 global 변수로 관리합니다.
+    global is_exiting
+    if is_exiting:
+        return
+    is_exiting = True
+    # 일반적으로 파일의 정상적인 닫힘, 메모리의 정리 등이 필요한 상황에서는 sys.exit 예외를 발생시켜 Python의 정상적인 종료 프로세스를 따르도록 하며, atexit에 등록된 함수들도 실행됩니다.
+    import sys
+    sys.exit(0)
+
+
+# Start your app
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, os_term_handler)
+    signal.signal(signal.SIGTERM, os_term_handler)
+
     # Sentry 등 초기화 코드가 있다면 여기에 작성합니다.
     sentry_sdk.init(
         dsn=os.environ['SENTRY_DSN'],
