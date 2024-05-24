@@ -41,7 +41,7 @@ def issue_type_screen_metadata(project):
 
     이 API를 통해 프로젝트의 스크린 구성을 가져올 수 있습니다.
     """
-    jg = DebugJiraGenerator(project)
+    jg = DebugJiraGenerator()
 
     screens = jg.get_jira_screens()
     screen_schemes = jg.get_jira_screen_schemes()

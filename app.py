@@ -6,6 +6,7 @@ import threading
 import contextlib
 from json import JSONDecodeError
 from urllib.request import urlopen, Request, HTTPError
+from requests.exceptions import HTTPError as RequestsHTTPError
 
 import sentry_sdk
 from slack_bolt import App
@@ -265,7 +266,16 @@ def safe_create_jira_issues(refined_fields, slack, jira):
         if slack.screenshots:
             jira.update_attachments(issue_key=response['key'], attachments=slack.screenshots)
         return response
+    except RequestsHTTPError as e:
+        # Jira의 HTTP 에러 세부 내용을 Sentry에 전송합니다.
+        _, response = e.args
+        errors = response.json()['errors']
+        sentry_sdk.set_context("Slack Link", slack.slack_link)
+        sentry_sdk.set_context("Response Code", response.status_code)
+        sentry_sdk.set_context("Response Errors", errors)
+        raise e
     except Exception as e:
+
         slack.say(
             channel=slack.reaction_user,
             blocks=[
@@ -450,7 +460,8 @@ def laas_jira_thread(event, client, say, collection):
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": f'*Summary*: {gpt_metadata["summary"]}',
+                        # repr 사용으로 개행문자를 이스케이프합니다.
+                        "text": f'*Summary*: {repr(gpt_metadata["summary"])[1:-1]}',
                     },
                     {
                         "type": "mrkdwn",
