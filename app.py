@@ -1,7 +1,6 @@
 import os
 import json
 import signal
-import atexit
 import threading
 import contextlib
 from json import JSONDecodeError
@@ -15,6 +14,10 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from middleware.laas import jira_summary_generator
 from middleware.laas.heuristic import parse_environment, outside_slack_jira_user_map
 from middleware.laas.jira_operator import JiraOperator
+
+# Initializes your app with your bot token and socket mode handler
+app = App(token=os.environ['SLACK_BOT_TOKEN'])
+slack_handler = SocketModeHandler(app_token=os.environ['SLACK_APP_TOKEN'], app=app)
 
 
 class SlackCollection:
@@ -526,11 +529,6 @@ def laas_jira_thread(event, client, say, collection):
         )
 
 
-# Initializes your app with your bot token and socket mode handler
-app = App(token=os.environ['SLACK_BOT_TOKEN'])
-is_exiting = False
-
-
 @app.event("reaction_added")
 def reaction(event, client, say):
     """
@@ -554,30 +552,16 @@ def os_term_handler(signum, frame):
     print(f'SIGNAL received: {signame} ({signum})')
     print('Frame:', frame)
 
-    at_exit_handler()
+    # 진행 중인 모든 non-daemon thread를 종료합니다.
+    for thread in threading.enumerate():
+        if thread is threading.main_thread() or thread.daemon:
+            continue
+        print(f'Terminating thread: {thread.name}, daemon: {thread.daemon}')
+        thread.join()
+    print('All non-daemon threads terminated')
 
-
-@atexit.register
-def at_exit_handler():
-    """
-    애플리케이션이 종료되려 할 때 호출됩니다.
-    참고: 이 모듈을 통해 등록된 함수는 다음과 같은 경우 호출되지 않습니다.
-    - 프로그램이 파이썬이 처리하지 않는 시그널에 의해 종료될 때.
-    - 파이썬의 치명적인 내부 에러가 감지되었을 때.
-    - os._exit() 가 호출될 때.
-
-    모든 실행 중인 스레드를 순회합니다.
-    스레드가 메인 스레드가 아니고 daemon이 아닌 스레드라면, 스레드가 실행을 마칠 때까지 기다립니다(스레드에 join합니다).
-    """
-    print('AtExit handler')
-    # sys.exit()을 호출할 경우 atexit을 중복 호출 할 수 있으므로 global 변수로 관리합니다.
-    global is_exiting
-    if is_exiting:
-        return
-    is_exiting = True
-    # 일반적으로 파일의 정상적인 닫힘, 메모리의 정리 등이 필요한 상황에서는 sys.exit 예외를 발생시켜 Python의 정상적인 종료 프로세스를 따르도록 하며, atexit에 등록된 함수들도 실행됩니다.
-    import sys
-    sys.exit(0)
+    # main thread인 slack_handler 를 종료합니다.
+    slack_handler.stop()
 
 
 # Start your app
@@ -595,4 +579,4 @@ if __name__ == "__main__":
         # 세션 추적은 하지 않는다.
         auto_session_tracking=False,
     )
-    SocketModeHandler(app, os.environ['SLACK_APP_TOKEN']).start()
+    slack_handler.start()
