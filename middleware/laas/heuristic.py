@@ -8,36 +8,3 @@ def outside_slack_jira_user_map(slack_id):
             return '5b08578531fcef2607e2a842'   # Sentry Jira User ID
         case _:
             return '557058:f58131cb-b67d-43c7-b30d-6b58d40bd077'    # Automation for Jira User ID
-
-
-def parse_environment(environment):
-    """
-    GPT의 휴리스틱을 적용하기 위한 함수
-    때로는 개발환경과 실환경의 용어를 De Facto로 구분하기도 하고, 사내에서만 사용하는 용어를 사용하기도 한다.
-    De Facto로 구분하는 경우는 GPT system prompt 를 사용하고, 사내에서만 사용하는 용어를 사용하는 경우를 De Facto 키 값을 참조하도록 한다.
-
-    원티드에서는 이슈타입을 작업, 버그로만 구별하기 때문에 이슈타입에는 휴리스틱을 적용하지 않는다.
-
-    원티드에서는 "발견된 환경" 이름이 특수한 경우가 많다.
-    - dev(개발 서버)
-    - nextweek(테스트 서버)
-    - wwwtest(스테이징 서버)
-    """
-    environment = environment.lower()
-    match environment:
-        case 'dev':
-            return 'dev(개발 서버)'
-        case 'nw':
-            return 'nextweek(테스트 서버)'
-        case 'nextweek':
-            return 'nextweek(테스트 서버)'
-        case 'www':
-            return 'wwwtest(스테이징 서버)'
-        case 'wwwtest':
-            return 'wwwtest(스테이징 서버)'
-        case 'prod':
-            return 'wwwtest(스테이징 서버)'
-        case 'production':
-            return 'wwwtest(스테이징 서버)'
-        case _:
-            return 'dev(개발 서버)'

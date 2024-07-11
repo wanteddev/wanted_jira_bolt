@@ -3,17 +3,24 @@ import json
 import signal
 import threading
 import contextlib
+from typing import Union
+from datetime import datetime
 from json import JSONDecodeError
 from urllib.request import urlopen, Request, HTTPError
-from requests.exceptions import HTTPError as RequestsHTTPError
 
 import sentry_sdk
 from slack_bolt import App
+from cachetools import cached, TTLCache
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from middleware.laas import jira_summary_generator
-from middleware.laas.heuristic import parse_environment, outside_slack_jira_user_map
+from middleware.laas.heuristic import outside_slack_jira_user_map
 from middleware.laas.jira_operator import JiraOperator
+from middleware.laas.jira_fields_schema import Issue, get_format_instructions
+
+if os.getenv('DEBUG', False):
+    from dotenv import load_dotenv
+    load_dotenv()
 
 # Initializes your app with your bot token and socket mode handler
 app = App(token=os.environ['SLACK_BOT_TOKEN'])
@@ -26,18 +33,26 @@ class SlackCollection:
     loading_emoji = 'loading'
 
 
-class PICollection:
+class PIThreadAll:
     # FIXME:
     workspace = 'wantedlab.atlassian.net'
     project = 'PI'
     trigger_emoji = 'pi_jira_gen'
-    laas_jira_hash = 'b2cac55301e0fc435b14d49a2069731093e785dff7099dcd1677c0c794dfd177'
+    laas_jira_hash = '7d7e1e4c2652e5c82b29e9dd88a7630a1e0f004b4cd971314b8126e4f16aab1c'
+    is_root: bool = True
+
+
+class PIThreadItem:
+    workspace = 'wantedlab.atlassian.net'
+    project = 'PI'
+    trigger_emoji = 'pi_thread'
+    laas_jira_hash = '7d7e1e4c2652e5c82b29e9dd88a7630a1e0f004b4cd971314b8126e4f16aab1c'
+    is_root: bool = False
 
 
 class SlackOperator:
-    def __init__(self, event, client, say, trigger_emoji):
+    def __init__(self, event, say, trigger_emoji):
         self.event = event
-        self.client = client
         self.say = say
 
         self.item_ts = event['item']['ts']
@@ -51,18 +66,23 @@ class SlackOperator:
         self.context = None
         self.screenshots = None
 
-    def get_conversation_data(self):
+        self.user_map = {
+            x['id']: {'real_name': x['real_name'], 'email': x['profile'].get('email')}
+            for x in get_all_slack_user_list() if not x['deleted']
+        }
+
+    def get_conversation_data(self, root=True):
         """
         스레드의 모든 메시지를 가져와 정제합니다
         """
         context = ''
         screenshots = []
-        conversations = self.client.conversations_replies(
+        conversations = app.client.conversations_replies(
             channel=self.item_channel,
             ts=self.item_ts,
         )
         self.thread_ts = conversations["messages"][0].get("thread_ts")
-        if self.thread_ts and self.thread_ts != self.item_ts:
+        if root and self.thread_ts and self.thread_ts != self.item_ts:
             self.say(
                 channel=self.reaction_user,
                 blocks=[
@@ -89,9 +109,10 @@ class SlackOperator:
         # 모든 대화 메시지를 가져옵니다
         for message in conversations["messages"]:
             # Process each message in the thread
+            message_dt = datetime.fromtimestamp(float(message['ts'])).isoformat()
+            user_name = self.user_map.get(message['user'], {'real_name': 'Unknown'})['real_name']
             text = message.get("text", "")
-            # Do something with the message text
-            context += text + '\n'
+            context += f'{message_dt} {user_name}: """{text}"""' + '\n\n'
 
             # conversation 에 대한 모든 첨부파일을 복제합니다.
             for file in message.get('files', []):
@@ -110,16 +131,16 @@ class SlackOperator:
         return True
 
     @property
-    def slack_link(self):
+    def link(self):
         return f'https://{SlackCollection.workspace}/archives/{self.item_channel}/p{self.item_ts.replace(".", "")}{f"?thread_ts={self.thread_ts}" if self.thread_ts else ""}'
 
-    def check_gpt_response(self, hash):
+    def check_gpt_response(self, hash, params):
         """
         GPT 응답이 올바른지 확인합니다.
         이 단계는 LaaS 서버의 응답을 잘 받았는지 확인하는 단계입니다
         """
         try:
-            gpt_response = jira_summary_generator(hash, self.context)
+            gpt_response = jira_summary_generator(hash, params)
         except Exception as e:
             self.say(
                 channel=self.reaction_user,
@@ -140,7 +161,7 @@ class SlackOperator:
                             },
                             {
                                 "type": "mrkdwn",
-                                "text": f'<{self.slack_link}|스레드 바로가기>',
+                                "text": f'<{self.link}|스레드 바로가기>',
                             }
                         ]
                     }
@@ -169,7 +190,7 @@ class SlackOperator:
                             },
                             {
                                 "type": "mrkdwn",
-                                "text": f'<{self.slack_link}|스레드 바로가기>',
+                                "text": f'<{self.link}|스레드 바로가기>',
                             }
                         ]
                     }
@@ -210,7 +231,7 @@ class SlackOperator:
                             },
                             {
                                 "type": "mrkdwn",
-                                "text": f'<{self.slack_link}|스레드 바로가기>',
+                                "text": f'<{self.link}|스레드 바로가기>',
                             }
                         ]
                     }
@@ -240,7 +261,7 @@ class SlackOperator:
                             },
                             {
                                 "type": "mrkdwn",
-                                "text": f'<{self.slack_link}|스레드 바로가기>',
+                                "text": f'<{self.link}|스레드 바로가기>',
                             }
                         ]
                     }
@@ -249,94 +270,17 @@ class SlackOperator:
             raise e
 
 
-def get_jira_account_id(slack, jira):
-    # Get user info: Extract email from user info: permission 필요. users:read.email
-    assignee_user_info = slack.client.users_info(user=slack.reaction_user)
-    reporter_user_info = slack.client.users_info(user=slack.item_user)
-    return {
-        'assignee': jira.get_user_id_from_slack(assignee_user_info) or outside_slack_jira_user_map(slack.reaction_user),
-        'reporter': jira.get_user_id_from_slack(reporter_user_info) or outside_slack_jira_user_map(slack.item_user),
-    }
+@cached(cache=TTLCache(maxsize=1, ttl=60 * 60 * 24))
+def get_all_slack_user_list():
+    return app.client.users_list()['members']
 
 
-def safe_create_jira_issues(refined_fields, slack, jira):
-    """
-    Jira 이슈를 생성합니다.
-    이 단계는 Jira API를 사용하여 이슈를 생성하는 단계입니다.
-    """
-    try:
-        response = jira.client.create_issue(fields=refined_fields)
-        if slack.screenshots:
-            jira.update_attachments(issue_key=response['key'], attachments=slack.screenshots)
-        return response
-    except RequestsHTTPError as e:
-        # Jira의 HTTP 에러 세부 내용을 Sentry에 전송합니다.
-        _, response = e.args
-        errors = response.json()['errors']
-        sentry_sdk.set_context("Slack Link", slack.slack_link)
-        sentry_sdk.set_context("Response Code", response.status_code)
-        sentry_sdk.set_context("Response Errors", errors)
-        raise e
-    except Exception as e:
-
-        slack.say(
-            channel=slack.reaction_user,
-            blocks=[
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": f'Jira 이슈 생성에 실패했습니다.'
-                    }
-                },
-                {
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f'지라 이슈를 생성하는 도중에 실패했습니다. 스레드 최상단에 이모지를 달면 스레드 내용을 분석해 스레드를 단 사람이 보고자, 이모지를 단 사람이 어사인되어 이슈를 생성합니다.',
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": f'<{slack.slack_link}|스레드 바로가기>',
-                        }
-                    ]
-                }
-            ]
-        )
-        raise e
+@app.event("team_join")
+def onboarding(event, say):
+    get_all_slack_user_list.cache_clear()
 
 
-def screen_fields(metadata):
-    """
-    debug.issue_type_screen_metadata(project) 함수의 결과를 바탕으로 필드를 생성합니다.
-    필드가 명시적으로 지정되어있는 이유는 Jira 화면 및 필드 구성을 프로젝트마다 다르게 할 수 있기 때문입니다.
-    필수 필드는 Jira 화면 구성에서 필수로 지정되어있는 필드입니다 해당 필드를 지정하지 않으면 이슈 생성이 불가능합니다.
-    화면 구성에 맞는 적절한 필드를 지정해주세요.
-    """
-    return {
-        '버그': {
-            'summary': metadata['summary'],
-            'description': metadata['description'],
-            'issuetype': {'name': metadata['issue_type']},
-            'project': {'key': metadata['project']},
-            'assignee': {'id': metadata['assignee']},
-            'reporter': {'id': metadata['reporter']},
-            # FIXME: example) PI 프로젝트의 버그 이슈 타입에는 이슈 화면 필드에 "발견된 환경" 필드가 필수입니다.
-            'customfield_10106': {'value': metadata['environment']},
-        },
-        '작업': {
-            'summary': metadata['summary'],
-            'description': metadata['description'],
-            'issuetype': {'name': metadata['issue_type']},
-            'project': {'key': metadata['project']},
-            'assignee': {'id': metadata['assignee']},
-            'reporter': {'id': metadata['reporter']},
-        },
-    }
-
-
-def check_emoji(event, client, say, emoji):
+def check_emoji(event, say, emoji):
     """
     이미 스레드에 이모지, 즉 생성된 이슈가 있는지 확인합니다.
     스레드 내부에 이미 이모지가 있는 경우에는 이슈를 생성하지 않습니다
@@ -345,7 +289,7 @@ def check_emoji(event, client, say, emoji):
     item_ts = event['item']['ts']
     reaction_user = event['user']
 
-    reactions = client.reactions_get(
+    reactions = app.client.reactions_get(
         channel=item_channel,
         timestamp=item_ts,
     )
@@ -380,7 +324,7 @@ def check_emoji(event, client, say, emoji):
 
 
 @contextlib.contextmanager
-def loading_reaction(event, client):
+def loading_reaction(event):
     """
     GPT를 처리하는 동안 UX를 위해
     스레드에 loading 이모지를 추가합니다.
@@ -389,7 +333,7 @@ def loading_reaction(event, client):
     item_ts = event['item']['ts']
     try:
         # Respond with an emoji directly to the thread
-        client.reactions_add(
+        app.client.reactions_add(
             channel=channel,
             name=SlackCollection.loading_emoji,
             timestamp=item_ts,
@@ -402,7 +346,7 @@ def loading_reaction(event, client):
     finally:
         try:
             # Remove thumbsup reaction
-            client.reactions_remove(
+            app.client.reactions_remove(
                 channel=channel,
                 name=SlackCollection.loading_emoji,
                 timestamp=item_ts,
@@ -411,133 +355,108 @@ def loading_reaction(event, client):
             ...
 
 
-def laas_jira_thread(event, client, say, collection):
+def laas_jira(event, say, collection: Union[PIThreadAll, PIThreadItem]):
     """
     GPT 호출에 시간이 걸리기 때문에 스레드에서 처리합니다.
     Lambda 에서 호출할 경우 FaaS를 사용하는 것이 좋습니다.
     https://slack.dev/bolt-python/concepts#lazy-listeners
     """
     # 성능을 위해 loading_reaction 의존성을 제거합니다.
-    with loading_reaction(event, client):
-        if check_emoji(event, client, say, collection.trigger_emoji):
+    with loading_reaction(event):
+        if check_emoji(event, say, collection.trigger_emoji):
             return
 
-        slack = SlackOperator(event, client, say, collection.trigger_emoji)
-        if not slack.get_conversation_data():
+        slack = SlackOperator(event, say, collection.trigger_emoji)
+
+        if not slack.get_conversation_data(root=collection.is_root):
             return
 
-        jira = JiraOperator()
 
-        gpt_response = slack.check_gpt_response(collection.laas_jira_hash)
+        gpt_response = slack.check_gpt_response(collection.laas_jira_hash, {'conversations': slack.context, 'schema': get_format_instructions(Issue)})
         gpt_metadata = slack.validate_gpt_response_json(gpt_response, say)
 
-        jira_account_id = get_jira_account_id(slack, jira)
+        reporter_email = slack.user_map.get(slack.item_user, {}).get('email') or outside_slack_jira_user_map(slack.item_user)
+        assignee_email = slack.user_map.get(slack.reaction_user, {}).get('email') or outside_slack_jira_user_map(slack.reaction_user)
 
-        # Data Augmentation
-        gpt_metadata['project'] = collection.project
-        gpt_metadata['environment'] = parse_environment(gpt_metadata['environment'])
-        gpt_metadata['description'] += f'\n\n*Slack Link*: {slack.slack_link}'
-        gpt_metadata['description'] += f'\n_이 이슈는 Wanted Jira Bolt로부터 자동 생성되었습니다._'
-        gpt_metadata['reporter'] = jira_account_id['reporter']
-        gpt_metadata['assignee'] = jira_account_id['assignee']
+        issue = Issue.model_validate(gpt_metadata)
 
-        refined_fields = screen_fields(gpt_metadata)[gpt_metadata['issue_type']]
-        jira_response = safe_create_jira_issues(refined_fields, slack, jira)
-        blocks = [
-            {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": f'Jira 이슈가 생성되었습니다!'
-                }
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f'<https://{collection.workspace}/browse/{jira_response["key"]}|{jira_response["key"]}>'
-                }
-            },
-            {
-                "type": "context",
-                "elements": [
+        jira = JiraOperator()
+        jira.get_user_id_from_email(assignee_email)
+        refined_fields = issue.refined_fields(
+            jira.get_user_id_from_email(reporter_email),
+            jira.get_user_id_from_email(assignee_email),
+            slack.link,
+        )
+
+        try:
+            jira_response = jira.safe_create_issues(refined_fields, slack.screenshots)
+        except Exception as e:
+            slack.say(
+                channel=slack.reaction_user,
+                blocks=[
                     {
-                        "type": "mrkdwn",
-                        # repr 사용으로 개행문자를 이스케이프합니다.
-                        "text": f'*Summary*: {repr(gpt_metadata["summary"])[1:-1]}',
+                        "type": "header",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Jira 이슈 생성에 실패했습니다."
+                        }
                     },
                     {
-                        "type": "mrkdwn",
-                        "text": f'*Issue Type*: {gpt_metadata["issue_type"]}',
-                    }
-                ]
-            },
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f'*Description*: {gpt_metadata["description"]}',
-                    }
-                ]
-            },
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f'*Reporter*: <@{slack.item_user}>',
+                        "type": "section",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "이슈 타입별로 필수적인 필드가 있습니다. 필수 필드가 누락되지 않았는지 확인해보세요",
+                        }
                     },
                     {
-                        "type": "mrkdwn",
-                        "text": f'*Assignee*: <@{slack.reaction_user}>',
-                    }
+                        "type": "section",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "혹은 Jira 서버 오류로 인해 이슈 생성에 실패할 수 있습니다. 이런 경우 잠시 후 다시 시도해보세요.",
+                        }
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": f"<{slack.link}|스레드 바로가기>"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": f"Error Message: ```{str(e)}```"
+                            }
+                        ]
+                    },
                 ]
-            },
-        ]
-        if gpt_metadata['issue_type'] == '버그':
-            # 버그 이슈인 경우 필수 필드인 환경 정보로 추가합니다.
-            blocks.append(
-                {
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f'*Environment*: {gpt_metadata["environment"]}',
-                        }
-                    ]
-                }
             )
-            blocks.append(
-                {
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            # FIXME: 사내 가이드 문서가 필요한 경우 첨부합니다.
-                            "text": f'<https://{collection.workspace}/wiki/spaces/QA/pages/82576189|버그 등록 가이드> 문서를 참고하여 이슈 필드를 수정해 주세요.',
-                        }
-                    ]
-                }
-            )
+            raise e
 
         say(
             channel=slack.item_channel,
-            blocks=blocks,
+            blocks=issue.refined_blocks(jira_response, slack.item_user, slack.reaction_user, collection.workspace),
             # 스레드가 없으면 스레드를 생성합니다.
             thread_ts=slack.thread_ts or slack.item_ts,
         )
 
 
+
 @app.event("reaction_added")
-def reaction(event, client, say):
+def reaction(event, say):
     """
     이모지에 따라 트리거되는 작업을 정의합니다.
     """
     match event['reaction']:
-        case PICollection.trigger_emoji:
-            t = threading.Thread(target=laas_jira_thread, args=(event, client, say, PICollection), daemon=False)
+        case PIThreadAll.trigger_emoji:
+            t = threading.Thread(target=laas_jira, args=(event, say, PIThreadAll), daemon=False)
             t.start()
+        case PIThreadItem.trigger_emoji:
+            t = threading.Thread(target=laas_jira, args=(event, say, PIThreadItem), daemon=False)
 
 
 def os_term_handler(signum, frame):

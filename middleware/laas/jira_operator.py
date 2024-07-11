@@ -20,14 +20,10 @@ class JiraOperator:
         for attachment in attachments:
             self.client.add_attachment_object(issue_key, BytesIO(attachment))
 
-    def get_user_id_from_slack(self, user_info):
+    def get_user_id_from_email(self, email):
         """
         Slack 유저 정보를 바탕으로 Jira 유저 ID를 가져옵니다.
         """
-        try:
-            email = user_info["user"]["profile"]["email"]
-        except KeyError:
-            return None
         resp = self.client.get(
             self.client.resource_url('user/search'),
             params={'query': email},
@@ -36,3 +32,13 @@ class JiraOperator:
             return resp[0]['accountId']
         except IndexError:
             return None
+
+    def safe_create_issues(self, refined_fields, screenshots):
+        """
+        Jira 이슈를 생성합니다.
+        이 단계는 Jira API를 사용하여 이슈를 생성하는 단계입니다.
+        """
+        response = self.client.create_issue(fields=refined_fields)
+        if screenshots:
+            self.update_attachments(issue_key=response['key'], attachments=screenshots)
+        return response
