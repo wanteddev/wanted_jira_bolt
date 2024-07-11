@@ -457,6 +457,7 @@ def reaction(event, say):
             t.start()
         case PIThreadItem.trigger_emoji:
             t = threading.Thread(target=laas_jira, args=(event, say, PIThreadItem), daemon=False)
+            t.start()
 
 
 def os_term_handler(signum, frame):
