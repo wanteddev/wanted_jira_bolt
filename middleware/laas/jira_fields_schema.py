@@ -61,18 +61,29 @@ class Issue(BaseModel):
 
     def refined_fields(self, reporter_id, assignee_id, slack_link):
         self.description += f'\n\n*Slack Link*: {slack_link}\n_이 이슈는 Wanted Jira Bolt로부터 자동 생성되었습니다._'
-        return {
-            'project': {'key': 'PI'},
-            'reporter': {'id': reporter_id},
-            'assignee': {'id': assignee_id},
-            'issuetype': {'name': self.issue_type},
-            'description': self.description,
-            'summary': self.summary,
-            'duedate': str(self.due_date) if self.due_date else None,
-            'customfield_10106': {'value': self.environment} if self.environment else None,
-            'customfield_10177': [{'value': prop} for prop in self.bug_property] if self.bug_property else None,
-        }
-    
+        if self.issue_type == '버그':
+            return {
+                'project': {'key': 'PI'},
+                'reporter': {'id': reporter_id},
+                'assignee': {'id': assignee_id},
+                'issuetype': {'name': self.issue_type},
+                'description': self.description,
+                'summary': self.summary,
+                'duedate': str(self.due_date) if self.due_date else None,
+                'customfield_10106': {'value': self.environment} if self.environment else None,
+                'customfield_10177': [{'value': prop} for prop in self.bug_property] if self.bug_property else None,
+            }
+        else:
+            return {
+                'project': {'key': 'PI'},
+                'reporter': {'id': reporter_id},
+                'assignee': {'id': assignee_id},
+                'issuetype': {'name': self.issue_type},
+                'description': self.description,
+                'summary': self.summary,
+                'duedate': str(self.due_date) if self.due_date else None,
+            }
+
     def refined_blocks(self, jira_response, item_user, reaction_user, workspace):
         blocks = [
             {
