@@ -435,6 +435,7 @@ if __name__ == "__main__":
         # of transactions for performance monitoring.
         # We recommend adjusting this value in production.
         traces_sample_rate=1.0,
+        server_name='wanted_jira_bolt',
         # 세션 추적은 하지 않는다.
         auto_session_tracking=False,
     )
