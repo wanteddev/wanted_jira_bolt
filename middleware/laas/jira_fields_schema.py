@@ -70,7 +70,7 @@ class Issue(BaseModel):
                 'description': self.description,
                 'summary': self.summary,
                 'duedate': str(self.due_date) if self.due_date else None,
-                'priority': {'value': self.priority} if self.priority else None,
+                'priority': {'name': self.priority} if self.priority else None,
                 'customfield_10106': {'value': self.environment} if self.environment else None,
                 'customfield_10177': [{'value': prop} for prop in self.bug_property] if self.bug_property else None,
             }
