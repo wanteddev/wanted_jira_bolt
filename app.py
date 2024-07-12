@@ -3,7 +3,6 @@ import json
 import signal
 import threading
 import contextlib
-from typing import Union
 from datetime import datetime
 from json import JSONDecodeError
 from urllib.request import urlopen, Request, HTTPError
@@ -33,21 +32,12 @@ class SlackCollection:
     loading_emoji = 'loading'
 
 
-class PIThreadAll:
+class PICollection:
     # FIXME:
     workspace = 'wantedlab.atlassian.net'
     project = 'PI'
     trigger_emoji = 'pi_jira_gen'
     laas_jira_hash = '7d7e1e4c2652e5c82b29e9dd88a7630a1e0f004b4cd971314b8126e4f16aab1c'
-    is_root: bool = True
-
-
-class PIThreadItem:
-    workspace = 'wantedlab.atlassian.net'
-    project = 'PI'
-    trigger_emoji = 'pi_thread'
-    laas_jira_hash = '7d7e1e4c2652e5c82b29e9dd88a7630a1e0f004b4cd971314b8126e4f16aab1c'
-    is_root: bool = False
 
 
 class SlackOperator:
@@ -71,7 +61,7 @@ class SlackOperator:
             for x in get_all_slack_user_list() if not x['deleted']
         }
 
-    def get_conversation_data(self, root=True):
+    def get_conversation_data(self):
         """
         스레드의 모든 메시지를 가져와 정제합니다
         """
@@ -82,29 +72,6 @@ class SlackOperator:
             ts=self.item_ts,
         )
         self.thread_ts = conversations["messages"][0].get("thread_ts")
-        if root and self.thread_ts and self.thread_ts != self.item_ts:
-            self.say(
-                channel=self.reaction_user,
-                blocks=[
-                    {
-                        "type": "header",
-                        "text": {
-                            "type": "plain_text",
-                            "text": f'스레드 최상단에 이모지를 달아주세요.'
-                        },
-                    },
-                    {
-                        "type": "context",
-                        "elements": [
-                            {
-                                "type": "mrkdwn",
-                                "text": f':{self.emoji}: 이모지가 스레드 내부에 달려있어서 지라 이슈를 생성할 수 없습니다. 스레드 최상단에 이모지를 달아주세요.',
-                            },
-                        ]
-                    }
-                ],
-            )
-            return False
 
         # 모든 대화 메시지를 가져옵니다
         for message in conversations["messages"]:
@@ -205,38 +172,7 @@ class SlackOperator:
         """
         try:
             gpt_metadata = json.loads(gpt_response)
-            assert gpt_metadata['issue_type'] in ['버그', '작업']
             return gpt_metadata
-        except AssertionError as e:
-            say(
-                channel=self.reaction_user,
-                blocks=[
-                    {
-                        "type": "header",
-                        "text": {
-                            "type": "plain_text",
-                            "text": f'Jira 이슈 생성에 실패했습니다.'
-                        }
-                    },
-                    {
-                        "type": "context",
-                        "elements": [
-                            {
-                                "type": "mrkdwn",
-                                "text": gpt_response,
-                            },
-                            {
-                                "type": "mrkdwn",
-                                "text": f'GPT 분류에 실패했습니다. 지라를 생성하기에 앞서 스레드 요약이 충분한지 확인해보세요.',
-                            },
-                            {
-                                "type": "mrkdwn",
-                                "text": f'<{self.link}|스레드 바로가기>',
-                            }
-                        ]
-                    }
-                ],
-            )
         except JSONDecodeError as e:
             say(
                 channel=self.reaction_user,
@@ -277,13 +213,15 @@ def get_all_slack_user_list():
 
 @app.event("team_join")
 def onboarding(event, say):
+    """
+    워크스페이스에 누군가 새로 들어올 때마다 캐시 초기화
+    """
     get_all_slack_user_list.cache_clear()
 
 
 def check_emoji(event, say, emoji):
     """
     이미 스레드에 이모지, 즉 생성된 이슈가 있는지 확인합니다.
-    스레드 내부에 이미 이모지가 있는 경우에는 이슈를 생성하지 않습니다
     """
     item_channel = event['item']['channel']
     item_ts = event['item']['ts']
@@ -313,7 +251,8 @@ def check_emoji(event, say, emoji):
                     "elements": [
                         {
                             "type": "mrkdwn",
-                            "text": f'이미 :{emoji}: 이모지가 스레드에 달려있어서 지라 이슈를 생성할 수 없습니다. 히스토리가 이미 지라 티켓으로 저장되었으니 어사인을 변경하시거나, 스레드에서 논의를 지속하거나, 이모지를 모두 지우고 다시 시도해보세요.'
+                            "text": f'이미 :{emoji}: 이모지가 있어서 지라 이슈를 생성할 수 없습니다.'
+                            ' 히스토리가 이미 지라 티켓으로 저장되었으니 어사인을 변경하시거나, 스레드에서 논의를 지속하거나, 이모지를 모두 지우고 다시 시도해보세요.'
                         },
                     ]
                 }
@@ -355,7 +294,7 @@ def loading_reaction(event):
             ...
 
 
-def laas_jira(event, say, collection: Union[PIThreadAll, PIThreadItem]):
+def laas_jira(event, say, collection: PICollection):
     """
     GPT 호출에 시간이 걸리기 때문에 스레드에서 처리합니다.
     Lambda 에서 호출할 경우 FaaS를 사용하는 것이 좋습니다.
@@ -368,11 +307,14 @@ def laas_jira(event, say, collection: Union[PIThreadAll, PIThreadItem]):
 
         slack = SlackOperator(event, say, collection.trigger_emoji)
 
-        if not slack.get_conversation_data(root=collection.is_root):
+        if not slack.get_conversation_data():
             return
 
 
-        gpt_response = slack.check_gpt_response(collection.laas_jira_hash, {'conversations': slack.context, 'schema': get_format_instructions(Issue)})
+        gpt_response = slack.check_gpt_response(
+            collection.laas_jira_hash,
+            {'conversations': slack.context, 'schema': get_format_instructions(Issue)},
+        )
         gpt_metadata = slack.validate_gpt_response_json(gpt_response, say)
 
         reporter_email = slack.user_map.get(slack.item_user, {}).get('email') or outside_slack_jira_user_map(slack.item_user)
@@ -452,11 +394,8 @@ def reaction(event, say):
     이모지에 따라 트리거되는 작업을 정의합니다.
     """
     match event['reaction']:
-        case PIThreadAll.trigger_emoji:
-            t = threading.Thread(target=laas_jira, args=(event, say, PIThreadAll), daemon=False)
-            t.start()
-        case PIThreadItem.trigger_emoji:
-            t = threading.Thread(target=laas_jira, args=(event, say, PIThreadItem), daemon=False)
+        case PICollection.trigger_emoji:
+            t = threading.Thread(target=laas_jira, args=(event, say, PICollection), daemon=False)
             t.start()
 
 

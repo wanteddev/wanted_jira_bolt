@@ -97,6 +97,13 @@ class Issue(BaseModel):
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
+                    "text": f'이모지를 스레드 최상단에 달면 스레드 전체를 요약하고, 이모지를 내부에 달면 해당 메시지만 요약합니다. 생성된 내용을 확인해 주세요.'
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
                     "text": f'<https://{workspace}/browse/{jira_response["key"]}|{jira_response["key"]}>'
                 }
             },
