@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import signal
 import threading
@@ -417,10 +418,11 @@ def os_term_handler(signum, frame):
             continue
         print(f'Terminating thread: {thread.name}, daemon: {thread.daemon}')
         thread.join()
-    print('All non-daemon threads terminated')
-
-    # main thread인 slack_handler 를 종료합니다.
-    slack_handler.close()
+    else:
+        print('All non-daemon threads terminated')
+        # main thread인 slack_handler 를 종료합니다.
+        slack_handler.close()
+        sys.exit(128 + signum)
 
 
 # Start your app
