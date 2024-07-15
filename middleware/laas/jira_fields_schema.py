@@ -151,6 +151,19 @@ class Issue(BaseModel):
                     }
                 ]
             },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f'*Priority*: {self.priority}',
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f'*Due Date*: {str(self.due_date) if self.due_date else None}',
+                    }
+                ]
+            },
         ]
         if self.issue_type == '버그':
             blocks += [
@@ -160,10 +173,6 @@ class Issue(BaseModel):
                         {
                             "type": "mrkdwn",
                             "text": f'*Environment*: {self.environment}',
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": f'*Priority*: {self.priority}',
                         },
                     ]
                 },
