@@ -420,7 +420,7 @@ def os_term_handler(signum, frame):
     print('All non-daemon threads terminated')
 
     # main thread인 slack_handler 를 종료합니다.
-    slack_handler.stop()
+    slack_handler.close()
 
 
 # Start your app
