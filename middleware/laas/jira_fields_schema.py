@@ -71,8 +71,8 @@ class Issue(BaseModel):
         if self.issue_type == '버그':
             return {
                 'project': {'key': 'PI'},
-                'reporter': {'id': reporter_id},
-                'assignee': {'id': assignee_id},
+                'assignee': {'accountId': assignee_id},
+                'reporter': {'accountId': reporter_id},
                 'issuetype': {'name': self.issue_type},
                 'description': self.description,
                 'summary': self.summary,
@@ -84,8 +84,8 @@ class Issue(BaseModel):
         else:
             return {
                 'project': {'key': 'PI'},
-                'reporter': {'id': reporter_id},
-                'assignee': {'id': assignee_id},
+                'assignee': {'accountId': assignee_id},
+                'reporter': {'accountId': reporter_id},
                 'issuetype': {'name': self.issue_type},
                 'description': self.description,
                 'summary': self.summary,

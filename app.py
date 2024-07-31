@@ -10,6 +10,7 @@ from urllib.request import urlopen, Request, HTTPError
 
 import sentry_sdk
 from slack_bolt import App
+from pydantic import ValidationError
 from cachetools import cached, TTLCache
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
@@ -321,10 +322,49 @@ def laas_jira(event, say, collection: PICollection):
         reporter_email = slack.user_map.get(slack.item_user, {}).get('email') or outside_slack_jira_user_map(slack.item_user)
         assignee_email = slack.user_map.get(slack.reaction_user, {}).get('email') or outside_slack_jira_user_map(slack.reaction_user)
 
-        issue = Issue.model_validate(gpt_metadata)
+        try:
+            issue = Issue.model_validate(gpt_metadata)
+        except ValidationError:
+            slack.say(
+                channel=slack.reaction_user,
+                blocks=[
+                    {
+                        "type": "header",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Jira 이슈 생성에 실패했습니다."
+                        }
+                    },
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "이슈 타입별로 필수적인 필드가 있습니다. 필수 필드가 누락되지 않았는지 확인해보세요",
+                        }
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": f"<{slack.link}|스레드 바로가기>"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": f"Error Message: ```{str(e)}```"
+                            }
+                        ]
+                    },
+                ]
+            )
+            raise e
 
         jira = JiraOperator()
-        jira.get_user_id_from_email(assignee_email)
         refined_fields = issue.refined_fields(
             jira.get_user_id_from_email(reporter_email),
             jira.get_user_id_from_email(assignee_email),
@@ -348,7 +388,7 @@ def laas_jira(event, say, collection: PICollection):
                         "type": "section",
                         "text": {
                             "type": "plain_text",
-                            "text": "이슈 타입별로 필수적인 필드가 있습니다. 필수 필드가 누락되지 않았는지 확인해보세요",
+                            "text": "Jira 설정이 변경되거나, 개발 오류일 수 있습니다.",
                         }
                     },
                     {
