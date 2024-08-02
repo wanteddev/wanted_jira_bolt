@@ -324,7 +324,7 @@ def laas_jira(event, say, collection: PICollection):
 
         try:
             issue = Issue.model_validate(gpt_metadata)
-        except ValidationError:
+        except ValidationError as e:
             slack.say(
                 channel=slack.reaction_user,
                 blocks=[
