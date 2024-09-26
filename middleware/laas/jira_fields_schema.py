@@ -40,8 +40,8 @@ class Issue(BaseModel):
          ' "dev(개발 서버)", "nextweek(테스트 서버)", "wwwtest(스테이징 서버)" 중 반드시 하나를 선택해주세요.'
          ' 운영 서버는 "wwwtest(스테이징 서버)"로 선택해주세요.'
     )
-    priority: Literal['P1', 'P2', 'P3', 'P4'] = Field(
-        description='이슈의 중요도를 나타내며 기본값은 "P3"입니다. 앱 설치불가, System Crash, 서비스 중단 등의 심각한 버그에 한해서만 "P1"을 선택해주세요.'
+    priority: Literal['P3'] = Field(
+        description='이슈의 중요도를 나타내며 기본값은 "P3"입니다.'
     )
     bug_property: Optional[List[Literal[
         '요구사항 미비',
