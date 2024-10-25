@@ -22,7 +22,7 @@ def jira_summary_generator(hash, params: dict):
     """
     Wanted LaaS API 중 Jira 생성기를 호출합니다.
     """
-    return call_wanted_api('POST', '/api/preset/chat/completions', json={
+    return call_wanted_api('POST', '/api/preset/v2/chat/completions', json={
         "hash": hash,
         "params": params,
     })
