@@ -33,12 +33,12 @@ class JiraOperator:
         except IndexError:
             return None
 
-    def safe_create_issues(self, refined_fields, screenshots):
+    def safe_create_issues(self, refined_fields, file_data):
         """
         Jira 이슈를 생성합니다.
         이 단계는 Jira API를 사용하여 이슈를 생성하는 단계입니다.
         """
         response = self.client.create_issue(fields=refined_fields)
-        if screenshots:
-            self.update_attachments(issue_key=response['key'], attachments=screenshots)
+        if file_data:
+            self.update_attachments(issue_key=response['key'], attachments=file_data)
         return response

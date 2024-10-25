@@ -25,7 +25,7 @@ def get_format_instructions(cls: BaseModel) -> str:
     if "type" in reduced_schema:
         del reduced_schema["type"]
     # Ensure json in context is well-formed with double quotes.
-    return json.dumps(reduced_schema)
+    return json.dumps(reduced_schema, ensure_ascii=False)
 
 
 class Issue(BaseModel):

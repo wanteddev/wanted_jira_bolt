@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import base64
 import signal
 import threading
 import contextlib
@@ -18,6 +19,7 @@ from middleware.laas import jira_summary_generator
 from middleware.laas.heuristic import outside_slack_jira_user_map
 from middleware.laas.jira_operator import JiraOperator
 from middleware.laas.jira_fields_schema import Issue, get_format_instructions
+from middleware.laas.mimetype import get_mime_type_from_url, is_supported_mime_type
 
 if os.getenv('DEBUG', False):
     from dotenv import load_dotenv
@@ -39,7 +41,7 @@ class PICollection:
     workspace = 'wantedlab.atlassian.net'
     project = 'PI'
     trigger_emoji = 'pi_jira_gen'
-    laas_jira_hash = '7d7e1e4c2652e5c82b29e9dd88a7630a1e0f004b4cd971314b8126e4f16aab1c'
+    laas_jira_hash = '8008b106b08d86b0af7a55d0ad18ca058aab88fc7e7a5945eedee7f16827d21e'
 
 
 class SlackOperator:
@@ -53,22 +55,23 @@ class SlackOperator:
         self.reaction_user = event['user']
         self.emoji = trigger_emoji
 
-        # after get_conversation_data
+        # after set_conversation_data
         self.thread_ts = None
-        self.context = None
-        self.screenshots = None
+        self.messages = None
+        self.file_data = None
 
         self.user_map = {
             x['id']: {'real_name': x['real_name'], 'email': x['profile'].get('email')}
             for x in get_all_slack_user_list() if not x['deleted']
         }
 
-    def get_conversation_data(self):
+    def set_conversation_data(self):
         """
         스레드의 모든 메시지를 가져와 정제합니다
+        https://laas.wanted.co.kr/docs/guide/api/api-preset#%EC%B6%94%EA%B0%80-%EB%A9%94%EC%8B%9C%EC%A7%80%EC%97%90-%EC%9D%B4%EB%AF%B8%EC%A7%80%EB%A5%BC-%ED%8F%AC%ED%95%A8%ED%95%9C-%ED%98%B8%EC%B6%9C
         """
-        context = ''
-        screenshots = []
+        messages = []
+        file_data = []
         conversations = app.client.conversations_replies(
             channel=self.item_channel,
             ts=self.item_ts,
@@ -80,36 +83,73 @@ class SlackOperator:
             # Process each message in the thread
             message_dt = datetime.fromtimestamp(float(message['ts'])).isoformat()
             user_name = self.user_map.get(message['user'], {'real_name': 'Unknown'})['real_name']
-            text = message.get("text", "")
-            context += f'{message_dt} {user_name}: """{text}"""' + '\n\n'
+            text = f'{message_dt} {user_name}: """{message.get("text", "")}"""'
+            images = []
 
             # conversation 에 대한 모든 첨부파일을 복제합니다.
             for file in message.get('files', []):
                 private_file_url = file['url_private']
+
+                # 슬랙 파일 다운로드
                 headers = {'Authorization': f'Bearer {os.environ["SLACK_BOT_TOKEN"]}'}
                 req = Request(private_file_url, headers=headers)
                 try:
                     response = urlopen(req)
                 except HTTPError:
                     continue
-                content = response.read()
-                screenshots.append(content)
 
-        self.context = context
-        self.screenshots = screenshots
+                content = response.read()
+                file_data.append(content)
+
+                # MIME 타입 확인
+                mime_type = response.getheader('Content-Type') or get_mime_type_from_url(private_file_url)
+                
+                # 지원되는 형식인지 확인
+                if not is_supported_mime_type(mime_type):
+                    # raise ValueError(f"Unsupported MIME type: {mime_type}")
+                    continue
+
+                # Non-animated GIF인지 확인 (GIF에만 적용)
+                if mime_type == "image/gif" and b"NETSCAPE2.0" in content:
+                    # raise ValueError("Animated GIFs are not supported.")
+                    continue
+
+                # Base64 인코딩 수행
+                base64_image = base64.b64encode(content).decode('utf-8')
+
+                # 웹에서 사용할 수 있는 형식으로 반환
+                if base64_image:
+                    images.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
+                    })
+ 
+            if images:
+                messages.append({
+                    "role": "user",
+                    "content": [{"type": "text", "text": text}, *images]
+                })
+            else:
+                messages.append({
+                    "role": "user",
+                    "content": text,
+                })
+
+        self.messages = messages
+        self.file_data = file_data
         return True
 
     @property
     def link(self):
         return f'https://{SlackCollection.workspace}/archives/{self.item_channel}/p{self.item_ts.replace(".", "")}{f"?thread_ts={self.thread_ts}" if self.thread_ts else ""}'
 
-    def check_gpt_response(self, hash, params):
+    def check_gpt_response(self, hash, params, messages):
         """
         GPT 응답이 올바른지 확인합니다.
         이 단계는 LaaS 서버의 응답을 잘 받았는지 확인하는 단계입니다
         """
         try:
-            gpt_response = jira_summary_generator(hash, params)
+            gpt_response = jira_summary_generator(hash, params, messages)
         except Exception as e:
             self.say(
                 channel=self.reaction_user,
@@ -309,13 +349,13 @@ def laas_jira(event, say, collection: PICollection):
 
         slack = SlackOperator(event, say, collection.trigger_emoji)
 
-        if not slack.get_conversation_data():
+        if not slack.set_conversation_data():
             return
-
 
         gpt_response = slack.check_gpt_response(
             collection.laas_jira_hash,
-            {'conversations': slack.context, 'schema': get_format_instructions(Issue)},
+            {'schema': get_format_instructions(Issue)},
+            slack.messages,
         )
         gpt_metadata = slack.validate_gpt_response_json(gpt_response, say)
 
@@ -372,7 +412,7 @@ def laas_jira(event, say, collection: PICollection):
         )
 
         try:
-            jira_response = jira.safe_create_issues(refined_fields, slack.screenshots)
+            jira_response = jira.safe_create_issues(refined_fields, slack.file_data)
         except Exception as e:
             slack.say(
                 channel=slack.reaction_user,
