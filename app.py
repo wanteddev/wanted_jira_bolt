@@ -12,7 +12,6 @@ from urllib.request import urlopen, Request, HTTPError
 import sentry_sdk
 from slack_bolt import App
 from pydantic import ValidationError
-from cachetools import cached, TTLCache
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from middleware.laas import jira_summary_generator
@@ -60,11 +59,6 @@ class SlackOperator:
         self.messages = None
         self.file_data = None
 
-        self.user_map = {
-            x['id']: {'real_name': x['real_name'], 'email': x['profile'].get('email')}
-            for x in get_all_slack_user_list() if not x['deleted']
-        }
-
     def set_conversation_data(self):
         """
         스레드의 모든 메시지를 가져와 정제합니다
@@ -82,8 +76,8 @@ class SlackOperator:
         for message in conversations["messages"]:
             # Process each message in the thread
             message_dt = datetime.fromtimestamp(float(message['ts'])).isoformat()
-            user_name = self.user_map.get(message['user'], {'real_name': 'Unknown'})['real_name']
-            text = f'{message_dt} {user_name}: """{message.get("text", "")}"""'
+            message_user_info = app.client.users_info(user=message['user'])
+            text = f'{message_dt} {message_user_info["user"]["real_name"]}: """{message.get("text", "")}"""'
             images = []
 
             # conversation 에 대한 모든 첨부파일을 복제합니다.
@@ -248,19 +242,6 @@ class SlackOperator:
             raise e
 
 
-@cached(cache=TTLCache(maxsize=1, ttl=60 * 60 * 24))
-def get_all_slack_user_list():
-    return app.client.users_list()['members']
-
-
-@app.event("team_join")
-def onboarding(event, say):
-    """
-    워크스페이스에 누군가 새로 들어올 때마다 캐시 초기화
-    """
-    get_all_slack_user_list.cache_clear()
-
-
 def check_emoji(event, say, emoji):
     """
     이미 스레드에 이모지, 즉 생성된 이슈가 있는지 확인합니다.
@@ -359,8 +340,8 @@ def laas_jira(event, say, collection: PICollection):
         )
         gpt_metadata = slack.validate_gpt_response_json(gpt_response, say)
 
-        reporter_email = slack.user_map.get(slack.item_user, {}).get('email') or outside_slack_jira_user_map(slack.item_user)
-        assignee_email = slack.user_map.get(slack.reaction_user, {}).get('email') or outside_slack_jira_user_map(slack.reaction_user)
+        reporter_email = app.client.users_info(user=slack.item_user)['user']['profile'].get('email')
+        assignee_email = app.client.users_info(user=slack.reaction_user)['user']['profile'].get('email')
 
         try:
             issue = Issue.model_validate(gpt_metadata)
@@ -406,8 +387,8 @@ def laas_jira(event, say, collection: PICollection):
 
         jira = JiraOperator()
         refined_fields = issue.refined_fields(
-            jira.get_user_id_from_email(reporter_email),
-            jira.get_user_id_from_email(assignee_email),
+            jira.get_user_id_from_email(reporter_email) or outside_slack_jira_user_map(slack.item_user),
+            jira.get_user_id_from_email(assignee_email) or outside_slack_jira_user_map(slack.reaction_user),
             slack.link,
         )
 

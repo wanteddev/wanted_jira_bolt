@@ -24,6 +24,8 @@ class JiraOperator:
         """
         Slack 유저 정보를 바탕으로 Jira 유저 ID를 가져옵니다.
         """
+        if not email:
+            return None
         resp = self.client.get(
             self.client.resource_url('user/search'),
             params={'query': email},
